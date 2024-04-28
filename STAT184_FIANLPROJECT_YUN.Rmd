@@ -1,0 +1,330 @@
+---
+title: "Stat 184 Final project Report"
+author: "Michael Yun"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+# Research Question
+
+**How does the Regime type affect economic growth?**
+
+```{r Load package, message=FALSE, warning=FALSE}
+#load packages
+library(tidyverse)
+library(stargazer)
+```
+
+```{r Initial data}
+#load initial data
+worldbankdata<-read.csv("https://raw.githubusercontent.com/Migueldesanta/STAT184/main/worldbank_data.csv")
+polity<-read.csv("https://raw.githubusercontent.com/Migueldesanta/STAT184/main/p5v2018.csv")
+```
+
+# **Data Description**
+
+**World Development Indicators**
+
+**Source:** <https://databank.worldbank.org/source/world-development-indicators#>
+
+**GDP Growth:** It measures the increase in a country’s economic output over a specific period, which is 2010. And it’s measured as a percentage change in the Gross Domestic Product.
+
+**Population:** This represents the total number of people living in a country. Population is measured as an absolute number, counting all residents regardless of their legal status or citizenship.
+
+**Arable Land:** Arable land refers to the land suitable for agriculture per person, which is key for growing crops. It's measured in hectares or acres.
+
+**Polity 5 Project**
+
+**Source:** <https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fwww.systemicpeace.org%2Finscr%2Fp5v2018.xls&wdOrigin=BROWSELINK>
+
+**Polity 2 Score:** The Polity2 score combines the "Autocracy" and "Democracy" scores from the Polity IV dataset, which evaluates various aspects of a political system's institutional characteristics. The scale is from -10 to 10, -10 represents most autocratic, 10 represents most democratic.
+
+```{r Inspect Initial data}
+#Inspect Initial data of worldbankdata
+head(worldbankdata)
+```
+
+```{r}
+str(worldbankdata)
+```
+
+```{r}
+names(worldbankdata)
+```
+
+**Comments:** According to the inspection of worldbankdata, we have total 798 observations of 5 variables in the whole data set, which are "Country.Name","Country.Code" ,"Series.Name", "Series.Code" and "X2010..YR2010.". In this data set, each row(observation) represts the value of one indicator of a specific country in 2010. Some of the cases(data) are displayed above.
+
+```{r}
+#Inspect Initial data of polity
+head(polity)
+```
+
+```{r}
+str(polity)
+```
+
+```{r}
+names(polity)
+```
+
+**Comments:** According to the inspection of polity, we have total 17574 observations of 37 variables in the whole data set. In this data set, each row(observation) represts the value of some political indicators of a specific country in a specific year. Some of the cases(data) are displayed above.
+
+# Data Wrangling
+
+**Comments:** Since here we only plan to use Population and Arable Land as controlled variables, Polity 2 Score as independent variable and GDP Growth as dependent variables in the year of 2010, We need do some data wrangling for the final data set.
+
+```{r Data Wrangling}
+# Pivot the data from long to wide format, ensuring each row corresponds to a single country
+worldbankdata_wide <- worldbankdata %>%
+  pivot_wider(
+    names_from = `Series.Code`, 
+    values_from = `X2010..YR2010.`, 
+    id_cols =  `Country.Name`
+  )
+# Rename the columns as specified to 'gdpgrowth', 'population', 'arableland'
+worldbankdata_wide_renamed <- worldbankdata_wide %>%
+  rename(
+    gdpgrowth = `NY.GDP.MKTP.KD.ZG`,
+    population = `SP.POP.1564.TO`,
+    arableland = `AG.LND.ARBL.HA.PC`,
+    country = `Country.Name`)
+# Select the necessary columns
+polity_data_selected <- polity %>%
+  select(country , polity2,year) %>%
+  filter(year == 2010) 
+# Merge the two dataframes using an inner join on 'scode'
+merged_data <- inner_join(polity_data_selected, worldbankdata_wide_renamed, by = "country")
+merged_data<- merged_data %>%
+  mutate(
+    gdpgrowth = na_if(gdpgrowth, ".."),
+    population = na_if(population, ".."),
+    arableland = na_if(arableland, "..")
+  ) %>%
+  mutate(
+    gdpgrowth = as.numeric(gdpgrowth),
+    population = as.numeric(population),
+    arableland = as.numeric(arableland)
+  )
+# Remove rows with any NA values
+merged_data <- drop_na(merged_data)
+# Create a new 'democracy' variable
+merged_data$category <- cut(merged_data$polity2, breaks = c(-Inf, -6, 5, Inf),
+labels = c("Strongly Autocracy", "Anocracy", "Strongly Democracy"),right = FALSE)
+# Create three separate datasets
+data_autocratic <- filter(merged_data, category == "Strongly Autocracy")
+data_anocracy <- filter(merged_data, category == "Anocracy")
+data_democratic <- filter(merged_data, category == "Strongly Democracy")
+
+```
+
+**Comments:** Here we merge the two data sets with wanted variables, and create a new variable called category based on the polity 2 score, -10 to -6 is strongly autocracy, -5 to 5 is anocracy, and -6 to 10 is democracy.
+
+```{r Inspect merged data set}
+head(merged_data)
+```
+
+```{r}
+str(merged_data)
+```
+
+```{r}
+names(merged_data)
+```
+
+**Comments:** According to the inspection of merged data, we have total 137 observations of 7 variables in the whole data set. In this data set, each row(observation) represts the values of independent, dependent and controlled varabales of a specific country in 2010. Some of the cases(data) are displayed above.
+
+# Exploratory data analysis
+
+```{r Distribution of dependent variable}
+#create a histogram to display the distribution of GDP Growth
+ggplot(merged_data, aes(x = gdpgrowth)) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 30, fill = "#69b3a2", color = "#404040") +  
+  labs(title = "Distribution of GDP Growth",
+       subtitle = "Representing the frequency of GDP growth rates in 2010",
+       x = "GDP Growth (%)",
+       y = "Frequency") +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5), 
+    plot.subtitle = element_text(size = 16, face = "italic", hjust = 0.5), 
+    axis.title.x = element_text(vjust = -0.5), 
+    axis.title.y = element_text(vjust = 0.5), 
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    plot.background = element_rect(fill = "ivory", color = NA), 
+    panel.background = element_rect(fill = "whitesmoke", color = NA), 
+    legend.position = "none" 
+  )
+```
+
+**Comments:** The distribution of GDP growth rates is seen in the histogram. Most of the data is focused in the range of -10% to around 20%, with 0% to 10% being the most frequent occurrences. There is a noticeable peak, indicating that the dataset's average GDP growth rates fall between 2% and 3%. The distribution is right-skewed, which indicates that a few of the nations with the highest growth rates are tailing off to the right. If there are bars to the left of 0%, it means that certain nations' GDP growth has been negative. In general, the graph indicates a typical distribution of growth rates, with moderate growth being the most prevalent, strong growth being less often, and occasional contractions noted.
+
+```{r Distribution of independent vairbale }
+#create a histogram to display the distribution of GDP Growth
+ggplot(merged_data, aes(x = polity2)) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 30, fill = "#69b3a2", color = "#404040") +  
+  labs(title = "Distribution of Polity 2 Score",
+       subtitle = "Representing the frequency of Polity 2 Score in 2010",
+       x = "Polity 2 Score",
+       y = "Frequency") +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5), 
+    plot.subtitle = element_text(size = 16, face = "italic", hjust = 0.5), 
+    axis.title.x = element_text(vjust = -0.5), 
+    axis.title.y = element_text(vjust = 0.5), 
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    plot.background = element_rect(fill = "ivory", color = NA), 
+    panel.background = element_rect(fill = "whitesmoke", color = NA), 
+    legend.position = "none" 
+  )
+```
+
+**Comments:** The frequency of Polity 2 Scores for a group of nations in 2010 is depicted in this histogram. A nation's degree of democracy and autocracy may be gauged using the Polity 2 Score, which has a range of -10 (very autocratic) to +10 (extremely democratic). The distribution is fairly bimodal, with a larger peak at the high end suggesting a concentration of highly democratic countries and one peak in the negative range indicating a cluster of more authoritarian states. The medium range has a heterogeneous distribution, indicating a mix of nations with traits of moderate government. Notably, the +10 score has the highest frequency, suggesting that a sizable number of nations have strong democratic characteristics in this specific year.
+
+```{r Distribution of GDP Growth by regime type, warning=FALSE}
+#create a boxplot to display the distribution of GDP Growth by regime type
+ggplot(merged_data, aes(x = category, y = gdpgrowth, fill = category)) +
+  geom_boxplot(alpha = 0.7) +  
+  scale_fill_manual(values = c("red", "orange", "green")) +  
+  labs(title = "GDP Growth Distribution by Regime Type",
+       subtitle = "Comparing GDP growth across regime categories",
+       x = "Regime Type",
+       y = "GDP Growth (%)",
+       fill = "Regime Type") +
+  theme_minimal(base_size = 14) +  
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5), 
+    plot.subtitle = element_text(size = 16, hjust = 0.5), 
+    axis.title = element_text(size = 18), 
+    axis.text = element_text(size = 14), 
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 11), 
+    legend.position = "bottom", 
+    plot.background = element_rect(fill = "ivory", color = NA), 
+    panel.grid.major = element_line(color = "#CBD4C2"), 
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(fill = NA, color = "gray", size = 1) 
+  )
+
+```
+
+**Comments:** The GDP growth percentages for the three different regime types are compared in the boxplot. Every box displays the interquartile range (IQR) of GDP growth for each regime; a line across the box denotes the median figure. Strongly Autocracy regimes are represented by a red box with a smaller IQR than the other categories, suggesting less variation in GDP growth within this group. The orange-colored Anocracy group has a broader IQR, indicating higher variability. Strongly democratic regimes are represented by the green box, whose median value is larger than that of the other two groups. This suggests that GDP growth under strongly democratic regimes may be higher. Outliers are displayed in all categories as single points that go beyond the whiskers and reach the lowest and greatest values inside a range that has been computed.
+
+```{r Distribution of Polity 2 Score by regime type, warning=FALSE}
+#create a boxplot to display the distribution of Polity 2 Score by regime type
+ggplot(merged_data, aes(x = category, y = polity2, fill = category)) +
+  geom_boxplot(alpha = 0.7) +  
+  scale_fill_manual(values = c("red", "orange", "green")) +  
+  labs(title = "Polity 2 Score Distribution by Regime Type",
+       subtitle = "Comparing Polity 2 Score across regime categories",
+       x = "Regime Type",
+       y = "Polity 2 Score",
+       fill = "Regime Type") +
+  theme_minimal(base_size = 14) +  
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5), 
+    plot.subtitle = element_text(size = 16, hjust = 0.5), 
+    axis.title = element_text(size = 18), 
+    axis.text = element_text(size = 14), 
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 11), 
+    legend.position = "bottom", 
+    plot.background = element_rect(fill = "ivory", color = NA), 
+    panel.grid.major = element_line(color = "#CBD4C2"), 
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(fill = NA, color = "gray", size = 1) 
+  )
+```
+
+**Comments:** The distribution of Polity 2 scores among the three distinct regime groups is shown in the boxplot.A complete autocrat receives a score of -10, whereas a genuine democracy receives a score of +10. Strongly autocratic regimes are represented by the red box on the scale, which has limited variability and scores that are closely packed at the bottom. With a broader interquartile range spanning from negative to positive scores, the Anocracy group, shown in orange, has higher variability and a mixture of traits. With scores at the upper end of the spectrum, the green box for strongly democratic regimes indicates a concentration of democratic traits with less variability than an anocracy. Each regime type's appropriate color is used in the plot to visually assist in differentiating between the categories.
+
+# Data Visualization
+
+```{r Polity 2 vs GDP Growth, message=FALSE, warning=FALSE}
+# Create a scatter plot with 'category' used to color the points by regime type
+ggplot(merged_data, aes(x = polity2, y = gdpgrowth, color = category)) +
+  geom_point(alpha = 0.7, size = 3) +  
+  geom_smooth(method = "lm", se = TRUE, color = "black") +  
+  scale_color_manual(values = c("Strongly Autocracy" = "red", 
+                                "Anocracy" = "orange", 
+                                "Strongly Democracy" = "green")) +
+  labs(title = "Polity2 vs. GDP Growth",
+       x = "Polity2 Score",
+       y = "GDP Growth (%)",
+       color = "Regime Type") +
+  theme_minimal(base_size = 14) +  
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14),
+    legend.position = "right",
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 14),
+    plot.background = element_rect(fill = "ivory", color = NA),
+    panel.grid.major = element_line(color = "#CBD4C2"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "gray", size = 1, fill = NA)
+  )
+
+
+```
+
+**Comments:** From the plot, we can see a concentration of autocratic regimes (red points) with lower Polity2 scores and a mix of GDP growth outcomes. Anocratic regimes (orange points) are spread across the middle of the Polity2 scale, also with varied GDP growth. Democracies (green points) are clustered towards higher Polity2 scores, with several achieving high GDP growth rates. A linear regression line with a gray confidence interval band suggests a general trend where higher Polity2 scores (more democratic regimes) might be associated with lower GDP growth rates, but the spread of points indicates variability and the presence of outliers.
+
+```{r Polity 2 vs GDP Growth by regime type, message=FALSE}
+# Create a scatter plot with faceted regime types
+ggplot(merged_data, aes(x = polity2, y = gdpgrowth)) +
+  geom_point(aes(color = category), alpha = 0.6, size = 3) + 
+  geom_smooth(method = "lm", se = TRUE, color = "black",size = 0.7) +  
+  scale_color_manual(values = c("Strongly Autocracy" = "red", 
+                                "Anocracy" = "orange", 
+                                "Strongly Democracy" = "green")) + 
+  labs(title = "Polity2 vs. GDP Growth by Regime Type",
+       x = "Polity2 Score",
+       y = "GDP Growth (%)") +
+  facet_wrap(~ category, scales = "free_y") + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    strip.text = element_text(size = 14, face = "bold"),  
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    plot.background = element_rect(fill = "ivory", color = NA), 
+    panel.grid.major = element_line(color = "#CBD4C2"), 
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(color = "gray", fill = NA, size = 0.5) 
+  ) +
+  guides(color = guide_legend(title = "Regime Type"))
+```
+
+**Comments:** In the "Strongly Autocracy" regime, the relationship between Polity2 scores and GDP growth appears negative trend, indicating that within "Strongly Autocracy" regime, higher polity 2 scores will result in lower GDP growth rates. In the "Anocracy" regime, the relationship between Polity2 scores and GDP growth appears positive trend, indicating that within "Anocracy" regime, higher polity 2 scores will result in higher GDP growth rates. In the "Strongly Autocracy" regime, the relationship between Polity2 scores and GDP growth appears positive trend, indicating that within "Strongly Autocracy" regime, higher polity 2 scores will result in lower GDP growth rates. This illustrate different association trend of dependent and independent variables among different regime types.
+
+# Model Fitting
+
+**Comments:** To better understand the relationship between polity score and GDP Growth rate, we use population and arable land as controlled variables.
+
+```{r Model fitting, warning=FALSE}
+#model fitting
+overall<-lm(gdpgrowth~polity2+arableland+population, data=merged_data)
+autocracy<-lm(gdpgrowth~polity2+arableland+population, data = data_autocratic)
+anocracy<-lm(gdpgrowth~polity2+arableland+population, data = data_anocracy)
+democracy<-lm(gdpgrowth~polity2+arableland+population, data = data_democratic)
+#regression table
+stargazer(overall, autocracy, anocracy, democracy, type= "text", 
+title= "Regression Results", 
+dep.var.labels="GDP Growth(%)")
+```
+
+**Comments:** Regarding the controlled variables, in the four models, the results show that non of these are statistically significant, so we can ignore these controlled variables. The polity 2 score coefficients(overall: -0.134,autocracy: -3.408,anocracy: 0.620,democracy:-0.639) are all statistically significant and are consistent with the scatter plot.
+
+# Conclusion
+
+To sum up, for "Strongly Autocracy" regimes, a negative trend is observed, hinting that more democratic features could correlate with lower GDP growth within this category. Conversely, "Anocracy" regimes exhibit a positive trend, suggesting that as these regimes become less autocratic (higher Polity2 scores), they might experience higher GDP growth rates. And in "Strongly Democracy" regimes, suggests a negative correlation.
+
+Regardless which regime type, the trend is negative hinting that higher polity score could correlate with lower GDP growth.
